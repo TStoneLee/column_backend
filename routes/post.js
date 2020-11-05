@@ -5,121 +5,86 @@ const { readFile, writeFile } = require('../lib/myFs')
 
 // 传参必须传入column的ID
 route.use(async (req, res, next) => {
-  if (!req.session.userID) {
-    req.session.userID =  req.signedCookies.uid
+  try {
+    const postList = await readFile(`./database/post.txt`, 'utf8')
+    req.$POSTLIST = postList ? JSON.parse(postList) : []
+  } catch (e) {
+    req.$POSTLIST = []
+    console.log('readPost', e)
   }
   try {
-
-    let columnIndex = await readFile('./database/columnIndex.txt', 'utf8')
-    if (!columnIndex) {
-      columnIndex = []
-    } else {
-      columnIndex = JSON.parse(columnIndex)
-    }
-    req.$COLUMNINDEX = columnIndex
-    let postIndex= await readFile('./database/postIndex.txt', 'utf8')
-    if (!postIndex) {
-      postIndex = []
-    } else {
-      postIndex = JSON.parse(postIndex)
-    }
-    req.$POSTINDEX = postIndex
-
-    let users= await readFile('./database/users.txt', 'utf8')
-    if (!users) {
-      users = []
-    } else {
-      users = JSON.parse(users)
-    }
-    req.$USERS = users
-
-
-    let hasColumn = req.$COLUMNINDEX.find(column => +column.user_id === +req.session.userID)
-    if (hasColumn) {
-      let info = await readFile(`./database/columns/${hasColumn.path}.txt`, 'utf8')
-      req.$COlUMNINFO = JSON.parse(info)
-    }
-    let hasPostIndex = req.$POSTINDEX.find(index => parseInt(index.user_id) === parseInt(req.session.userID) && parseInt(index.column_id) === parseInt(req.body.column))
-    if (hasPostIndex) {
-      let post_list = await readFile(`./database/post/${hasPostIndex.path}.txt`, 'utf8')
-      if (!post_list) {
-        req.$POSTLIST = []
-      } else {
-        req.$POSTLIST = JSON.parse(post_list)
-      }
-    } else {
-      req.$POSTLIST = []
-    }
-    next()
-
+    const columnList = await readFile('./database/column.txt', 'utf8')
+    req.$COLUMNLIST = columnList ? JSON.parse(columnList) : []
   } catch (e) {
-    console.log(e)
+    req.$COLUMNLIST = []
+    console.log('readColumn', e)
   }
-
+  next()
 })
 
 route.post('/createPost', async (req, res) => {
-  console.log(req.signedCookies)
-  // 判断是否登录
-  if (!req.session.userID && !req.signedCookies.uid) {
+  try {
+    console.log(req.user)
+    if (!req.user) {
+      utils.responseInfo(res, {
+        code: 1,
+        codeText: "请先登录！"
+      })
+      return
+    } else {
+      const column_id = req.body && req.body.column_id || ''
+      let hasColumn = req.$COLUMNLIST.find(column => +column.column_id === +column_id && +column.user_id === +req.user.user_id)
+      if (!hasColumn) {
+        utils.responseInfo(res, {
+          code: 1,
+          codeText: "你尚未新建专栏！请先新建专栏！"
+        })
+        return
+      } else {
+        const {
+          title,
+          content,
+          image,
+          column_id
+        } = req.body
+        let _id = utils.createID(req.$POSTLIST)
+
+        const postInfo = {
+          _id,
+          post_id: _id,
+          title,
+          content,
+          image,
+          column_id,
+          user_id: req.user.user_id,
+          createAt: new Date().toLocaleString('zh-CN', {hour12: false})
+        }
+        req.$POSTLIST.push(postInfo)
+
+        writeFile(`./database/post.txt`, req.$POSTLIST, 'utf8').then((result, err)=> {
+          if (err) {
+            utils.responseInfo(res, {
+              code: 1,
+              codeText: "新建失败！"
+            })
+            return
+          }
+          utils.responseInfo(res)
+        })
+      }
+    }
+  } catch (e) {
     utils.responseInfo(res, {
       code: 1,
-      codeText: "请先登录！"
+      codeText: "您不能新建文章！"
     })
-    return
   }
-  // 判断是否有专栏列表
-  // let hasColumn = req.$COLUMNINDEX.find(column => +column.user_id === +req.session.userID)
-  if (!req.$COlUMNINFO) {
-    utils.responseInfo(res, {
-      code: 1,
-      codeText: "你尚未新建专栏！请先新建专栏！"
-    })
-    return
-  }
-
-  const {
-    title,
-    content,
-    image,
-    column,
-    author
-  } = req.body
-
-  let post_index = {
-    user_id: req.session.userID,
-    column_id: column,
-    path: `post${req.session.userID}-${column}`
-  }
-  if (!req.$POSTINDEX.find(index => parseInt(index.user_id) === parseInt(req.session.userID) && parseInt(index.column_id) === parseInt(column))) {
-    req.$POSTINDEX.push(post_index)
-  }
-  let userInfo = req.$USERS.find(user => parseInt(user._id) === parseInt(author))
-  let column_info = req.$COlUMNINFO.find(info => +info._id === +column)
-  let post_info = {
-    _id: utils.createID(req.$POSTLIST),
-    title,
-    content,
-    image,
-    column: column_info || {},
-    author: userInfo || {},
-    createAt: new Date().toLocaleString('zh-CN', {hour12: false})
-  }
-
-  req.$POSTLIST.push(post_info)
-  await writeFile('./database/postIndex.txt', req.$POSTINDEX, 'utf8')
-  await writeFile(`./database/post/post${req.session.userID}-${column}.txt`, req.$POSTLIST, 'utf8')
-
-  utils.responseInfo(res)
-
-
 })
 
-route.post('/postInfo', (req, res) => {
-  const {
-    post_id
-  } = req.body
-  const postInfo = req.$POSTLIST.find(post => parseInt(post._id) === parseInt(post_id))
+route.get('/postInfo/:pid', (req, res) => {
+  console.log(req.params.pid)
+  const post_id = req.params.pid
+  const postInfo = req.$POSTLIST.find(post => parseInt(post.post_id) === parseInt(post_id))
   if (!postInfo) {
     utils.responseInfo(res, {
       code: 1,
@@ -127,21 +92,22 @@ route.post('/postInfo', (req, res) => {
     })
     return
   }
-
   utils.responseInfo(res, {
     data: postInfo
   })
 })
 
-route.post('/postUpdate', async (req, res) => {
-  const {
-    column,
-    post_id,
-    title,
-    content,
-    image
-  } = req.body
-  let postInfo = req.$POSTLIST.find(post => parseInt(post._id) === parseInt(post_id))
+/**
+ * patch与post区别
+ * patch 传入部分数据，就值更新传入的数据，但是返回时，会全部返回
+ * post 如果只传入部分数据时，只会返回参数中只有传入的那些数据
+ *
+ * */
+route.patch('/postUpdate/:pid', async (req, res) => {
+  const pid = req.params.pid
+  const updateData = req.body
+  console.log(req.body)
+  let postInfo = req.$POSTLIST.find(post => parseInt(post.post_id) === parseInt(pid))
   if (!postInfo) {
     utils.responseInfo(res, {
       code: 1,
@@ -149,25 +115,34 @@ route.post('/postUpdate', async (req, res) => {
     })
     return
   }
-
-  Object.assign(postInfo, {title, content, image})
-  await writeFile(`./database/post/post${req.session.userID}-${column}.txt`, req.$POSTLIST, 'utf8')
-
-  utils.responseInfo(res)
-
+  if (updateData) {
+    Object.assign(postInfo, updateData)
+    await writeFile(`./database/post.txt`, req.$POSTLIST, 'utf8')
+    utils.responseInfo(res, {
+      data: req.$POSTLIST
+    })
+  } else {
+    utils.responseInfo(res, {
+      code: 1,
+      codeText: '数据出错'
+    })
+  }
 })
 
 route.post('/postDelete', async (req, res) => {
   const {
     post_id,
-    column
+    column_id
   } = req.body
 
   let delete_index = req.$POSTLIST.findIndex(post => {
-    return parseInt(post._id) === parseInt(post_id)
+    return parseInt(post.post_id) === parseInt(post_id)
+  })
+  let post_delete = req.$POSTLIST.find(post => {
+    return parseInt(post.post_id) === parseInt(post_id)
   })
 
-  if (!delete_index) {
+  if ((delete_index === -1) && !post_delete) {
     utils.responseInfo(res, {
       code: 1,
       codeText: "删除失败"
@@ -176,20 +151,20 @@ route.post('/postDelete', async (req, res) => {
   }
 
   req.$POSTLIST.splice(delete_index, 1)
-  await writeFile(`./database/post/post${req.session.userID}-${column}.txt`, req.$POSTLIST, 'utf8')
+  await writeFile(`./database/post.txt`, req.$POSTLIST, 'utf8')
 
   utils.responseInfo(res, {
-    codeText: "删除成功"
+    data: post_delete
   })
 })
 
 route.post('/postList', async (req, res) => {
   const {
-    column,
+    column_id,
     currentPage = 1,
     limit = 10
   } = req.body
-  let list = req.$POSTLIST.slice((currentPage - 1) * limit, currentPage * limit)
+  let list = req.$POSTLIST.filter(post => +post.column_id === +column_id)
   if (!list) {
     utils.responseInfo(res, {
       code: 1,
@@ -197,7 +172,6 @@ route.post('/postList', async (req, res) => {
     })
     return
   }
-
   utils.responseInfo(res, {
     data: list
   })

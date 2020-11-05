@@ -5,51 +5,18 @@ const { readFile, writeFile } = require("../lib/myFs")
 const utils = require('../lib/utils')
 
 route.use(async (req, res, next) => {
-  // console.log(req.user)
-
-  // if (!req.session.userID) {
-  //   req.session.userID = req.signedCookies.uid
+  // if (req.user) {
+  //   const {
+  //     user_id,
+  //     email
+  //   } = req.user
   // }
   try {
-    req.$COLUMNINDEX = await readFile('./database/columnIndex.txt', 'utf8')
-    req.$USERS = await readFile('./database/users.txt', 'utf8')
-    req.$USERS = JSON.parse(req.$USERS)
-    if (!req.$COLUMNINDEX) {
-      req.$COLUMNINDEX = []
-      req.$COLUMNLIST = []
-    } else {
-      req.$COLUMNINDEX = JSON.parse(req.$COLUMNINDEX)
-      if (req.user) {
-        const {
-          _id,
-          email
-        } = req.user
-        req.session.userID = _id
-
-        let index = req.$COLUMNINDEX.find(i => parseInt(i.user_id) === parseInt(req.session.userID))
-        if (index) {
-          req.$COLUMNLIST = await readFile(`./database/columns/${index.path}.txt`, 'utf8')
-          if (!req.$COLUMNLIST) {
-            req.$COLUMNLIST = []
-          } else {
-            req.$COLUMNLIST = JSON.parse(req.$COLUMNLIST)
-          }
-        } else {
-          req.$COLUMNLIST = []
-        }
-      } else {
-        let allColumnList = []
-        for (let column of req.$COLUMNINDEX) {
-          let result = await readFile(`./database/columns/${column.path}.txt`, 'utf8')
-          if (result) {
-            allColumnList = allColumnList.concat(JSON.parse(result))
-          }
-        }
-        req.$ALLCOLUMNLIST = allColumnList
-      }
-    }
-  } catch(e) {
-    console.log(e)
+    const columnList = await readFile('./database/column.txt', 'utf8')
+    req.$COLUMNLIST = columnList ? JSON.parse(columnList) : []
+  } catch (e) {
+    req.$COLUMNLIST = []
+    console.log('readColumn', e)
   }
   next()
 })
@@ -61,7 +28,7 @@ route.get('/columnList', (req, res) => {
   } = req.query
   currentPage = +currentPage
   limit = +limit
-  const columnData = JSON.parse(JSON.stringify(req.$ALLCOLUMNLIST))
+  const columnData = JSON.parse(JSON.stringify(req.$COLUMNLIST))
   let result = []
   // if (currentPage <= parseInt(columnData.length / limit)) {
     result = columnData.slice((currentPage -1) * limit, limit * currentPage)
@@ -71,9 +38,22 @@ route.get('/columnList', (req, res) => {
   })
 })
 
+route.get('/getColumnList', (req, res) => {
+  const {
+    user_id,
+    email
+  } = req.user
+  const columnData = JSON.parse(JSON.stringify(req.$COLUMNLIST)).filter(column => +column.user_id === +user_id)
+  utils.responseInfo(res, {
+    data: columnData
+  })
+})
+
+
+
 route.get('/columnInfo/:cid', async (req, res) => {
   const cid = req.params.cid
-  const info = req.$COLUMNLIST.find(column => column._id === parseInt(cid))
+  const info = req.$COLUMNLIST.find(column => column.column_id === parseInt(cid))
   if (!info) {
     utils.responseInfo(res, {
       code: 1,
@@ -87,59 +67,74 @@ route.get('/columnInfo/:cid', async (req, res) => {
 })
 
 route.post('/createColumn', async (req, res) => {
-  const {
-    title,
-    description,
-    avatar
-  } = req.body
-  let user = null
-  if (req.session.userID) {
-    user = req.$USERS.find(item => {
-      return item._id === req.session.userID
+  try {
+    const {
+      user_id,
+      email
+    } = req.user
+    const {
+      title,
+      description,
+      image
+    } = req.body
+    if (!user_id || (!title && !description)) {
+      utils.responseInfo(res, {
+        code: 1,
+        codeText: "你不能创建专栏，请检查！"
+      })
+      return
+    }
+    let _id = utils.createID(req.$COLUMNLIST)
+    const columnInfo = {
+      _id,
+      column_id: _id,
+      title,
+      description,
+      image,
+      user_id,
+      createAt: new Date().toLocaleString('zh-CN', {hour12: false})
+    }
+    req.$COLUMNLIST.push(columnInfo)
+    writeFile( `./database/column.txt`,req.$COLUMNLIST, 'utf8').then((result, err) => {
+      if (err) {
+        utils.responseInfo(res, {
+          code: 1,
+          codeText: '创建失败！'
+        })
+        return
+      }
+      utils.responseInfo(res)
     })
-  }
-  if (!user) {
+  } catch (e) {
     utils.responseInfo(res, {
+      code: 1,
       codeText: "你不能创建专栏，请检查！"
     })
-    return
   }
-  const columnInfo = {
-    _id: utils.createID(req.$COLUMNLIST),
-    title,
-    description,
-    avatar,
-    author: user.nickName || user.email,
-    createAt: new Date().toLocaleString('zh-CN', {hour12: false})
-  }
-  req.$COLUMNLIST.push(columnInfo)
-  const column_index = {
-    user_id: req.session.userID,
-    path: `columns${req.session.userID}`
-  }
-  if (!req.$COLUMNINDEX.find(index => index.user_id === req.session.userID)) {
-    req.$COLUMNINDEX.push(column_index)
-  }
-  await writeFile( `./database/columns/columns${req.session.userID}.txt`,req.$COLUMNLIST, 'utf8')
-  await writeFile( `./database/columnIndex.txt`,req.$COLUMNINDEX, 'utf8')
-
-  utils.responseInfo(res)
 })
 
 route.post('/columnUpdate/:cid', async (req, res) => {
   const cid = req.params.cid
   const updateInfo = req.body
-  let info = req.$COLUMNLIST.find(column => column._id === parseInt(cid))
+  let info = req.$COLUMNLIST.find(column => column.column_id === parseInt(cid))
   if (!info) {
     utils.responseInfo(res, {
       code: 1,
-      codeText: "更新该专栏失败！"
+      codeText: "该专栏不存在！"
     })
     return
   }
-  info = Object.assign(info, updateInfo)
-  await writeFile( `./database/columns/columns${req.session.userID}.txt`,req.$COLUMNLIST, 'utf8')
-  utils.responseInfo(res)
+  Object.assign(info, updateInfo)
+  writeFile( `./database/column.txt`,req.$COLUMNLIST, 'utf8').then((result, err) => {
+    if (err) {
+      utils.responseInfo(res, {
+        code: 1,
+        codeText: "更新失败！"
+      })
+      return
+    }
+    utils.responseInfo(res)
+  })
 })
 
 module.exports = route

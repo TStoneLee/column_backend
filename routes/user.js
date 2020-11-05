@@ -7,14 +7,11 @@ const jwt = require('jsonwebtoken')
 // 首先要获取数据库中的数据
 route.use(async (req, res, next) => {
   try {
-    req.$USERS = await myFs.readFile('./database/users.txt', 'utf8')
-    if (!req.$USERS) {
-      req.$USERS = []
-    } else {
-      req.$USERS = JSON.parse(req.$USERS)
-    }
+    const Users = await myFs.readFile('./database/users.txt', 'utf8')
+    req.$USERS = Users ? JSON.parse(Users) : []
   } catch (e) {
-    console.log(e)
+    console.log('readUseFile' , e)
+    req.$USERS = []
   }
   next()
 });
@@ -37,17 +34,13 @@ route.post('/register', (req, res) => {
   let _id = utils.createID(req.$USERS)
   const userInfo = {
     _id,
+    user_id: _id,
     email,
-    password,
     nickName,
-    description: '',
-    avatar: '',
-    column: '',
     createdTime: new Date().toLocaleString('zh-CN', {hour12: false})
   }
   req.$USERS.push(userInfo)
   myFs.writeFile('./database/users.txt', req.$USERS, 'utf8').then((result, err) => {
-    console.log('注册时写入数据库: ', result, err)
     if (err) {
       utils.responseInfo(res, {
         code: 1,
@@ -55,6 +48,7 @@ route.post('/register', (req, res) => {
       })
       return
     }
+    console.log('注册时写入数据库SUCCESS: ', result)
     utils.responseInfo(res)
   })
 });
@@ -62,12 +56,10 @@ route.post('/register', (req, res) => {
 route.post('/login', async (req, res) => {
   let hasUser = ''
   const {
-    email,
-    password,
-    nickName
+    email
   } = req.body;
   hasUser = req.$USERS.find(user => {
-    return user.email === email && user.password == password
+    return user.email === email
   });
   if (!hasUser) {
     utils.responseInfo(res, {
@@ -76,17 +68,17 @@ route.post('/login', async (req, res) => {
     });
     return
   }
-  const generatJwt = jwt.sign({
-    _id: hasUser._id,
+  const generateJwt = jwt.sign({
+    user_id: hasUser.user_id,
     email: hasUser.email
   }, 'secret12345', {
       expiresIn: 60 * 60 * 24
     }
   )
-  const token = `Bearer ${generatJwt}`
-  res.cookie('uid', hasUser._id, { maxAge:1000 * 60 * 60 * 24, signed:true })
+  const token = `Bearer ${generateJwt}`
+  res.cookie('uid', hasUser.user_id, { maxAge:1000 * 60 * 60 * 24, signed:true })
   res.cookie('email', hasUser.email, { maxAge:1000 * 60 * 60 * 24, signed:true })
-  req.session.userID = hasUser._id;
+  // req.session.userID = hasUser.user_id; // 不使用session
   utils.responseInfo(res, { data: { token } })
 });
 
@@ -95,12 +87,12 @@ route.get('/currentUser', async (req, res) => {
   if (req.user) {
     let userInfo = ''
     const {
-      _id,
+      user_id,
       email
     } = req.user
 
     userInfo = req.$USERS.find(user => {
-      return user.email === email && user._id == _id
+      return user.email === email && user.user_id == user_id
     });
     if (!userInfo) {
       utils.responseInfo(res, {
@@ -120,31 +112,25 @@ route.get('/currentUser', async (req, res) => {
   }
 })
 
-route.get('/logout', async (req, res) => {
-  // let userSession = await myFs.readFile('./database/session.txt', 'utf8')
-  // userSession = JSON.parse(userSession)
-  // let index = userSession.find(session => session.userID === req.session.userID)
-  // if (index) {
-  //   userSession.splice(index, 1)
-  let hasUser = ''
-  hasUser = req.$USERS.find(user => {
-    return parseInt(user._id) === parseInt(req.signedCookies.uid)
-  });
-  if (!hasUser) {
-    utils.responseInfo(res, {
-      code: 1,
-      codeText: '退出失败！'
-    });
-    return
-  }
-
-  req.session.userID = null
-  res.cookie('uid', hasUser._id, { maxAge:0, signed:true })
-  res.cookie('email', hasUser.email, { maxAge:0, signed:true })
-  utils.responseInfo(res, {
-    codeText: "退出成功"
-  })
-  // }
-})
+// route.get('/logout', async (req, res) => {
+//   let hasUser = ''
+//   hasUser = req.$USERS.find(user => {
+//     return parseInt(user._id) === parseInt(req.signedCookies.uid)
+//   });
+//   if (!hasUser) {
+//     utils.responseInfo(res, {
+//       code: 1,
+//       codeText: '退出失败！'
+//     });
+//     return
+//   }
+//
+//   req.session.userID = null
+//   res.cookie('uid', hasUser.user_id, { maxAge:0, signed:true })
+//   res.cookie('email', hasUser.email, { maxAge:0, signed:true })
+//   utils.responseInfo(res, {
+//     codeText: "退出成功"
+//   })
+// })
 
 module.exports = route

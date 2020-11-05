@@ -28,9 +28,9 @@ app.use(expressJwt({
   algorithms: ['HS256'],
   credentialsRequired: false
 }).unless({
-  path: ['/user/register', '/user/logout', '/user/login', '/column/columnList']  // 指定路径不经过 Token 解析
+  path: ['/user/register', '/user/logout', '/user/login']  // 指定路径不经过 Token 解析
 }))
-
+// 全局错误捕获 改进
 // app.use(bodyParser.urlencoded({ extended: false }))
 app.use(bodyParser.json())
 app.use(cookieParser('keyboard cat'))
@@ -38,7 +38,6 @@ app.use(cookieParser('keyboard cat'))
 
 app.use(session(config.session));
 
-const options =
 
 app.use(express.static(path.join(__dirname, 'database'), {
   setHeaders(res, path, stat) {
